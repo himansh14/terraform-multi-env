@@ -19,7 +19,6 @@ resource "aws_s3_bucket_versioning" "versioning" {
     status = "Enabled"
   }
 }
-
 # Enable Encryption
 resource "aws_s3_bucket_server_side_encryption_configuration" "encryption" {
   bucket = aws_s3_bucket.app_bucket.id
