@@ -74,4 +74,4 @@ jobs:
       - name: Apply Selected Environment
         run: |
           cd live/${{ github.event.inputs.environment }}
-          terragrunt run-all apply -auto-approve
+          terragrunt run-all apply -auto-approve --terragrunt-non-interactive
