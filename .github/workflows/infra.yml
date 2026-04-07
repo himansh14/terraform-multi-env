@@ -1,6 +1,6 @@
 name: Terragrunt CI/CD
 
-permissions: 
+permissions:
   id-token: write
   contents: read
 
@@ -17,19 +17,30 @@ on:
           - uat
           - prod
 
+      action:
+        description: "Action to perform"
+        required: true
+        type: choice
+        options:
+          - apply
+          - destroy
+
+      confirm:
+        description: "Type YES to confirm destroy (only for destroy)"
+        required: false
+
 jobs:
 
-  # -------------------------
-  # PLAN (ONLY QA ON PR)
-  # -------------------------
   plan:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: hashicorp/setup-terraform@v3
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
 
       - name: Install Terragrunt
         run: |
@@ -37,28 +48,30 @@ jobs:
           chmod +x terragrunt_linux_amd64
           sudo mv terragrunt_linux_amd64 /usr/local/bin/terragrunt
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ap-south-1
           role-to-assume: arn:aws:iam::273721849976:role/JenkinsRole
 
-      - name: Plan QA
+      - name: Terragrunt Plan (QA)
         run: |
           cd live/qa
-          terragrunt run-all plan
+          terragrunt run-all plan --terragrunt-non-interactive
 
-
-  # -------------------------
-  # APPLY (MANUAL PER ENV)
-  # -------------------------
-  apply:
+  deploy:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
-    steps:
-      - uses: actions/checkout@v4
+    # This enables environment-based protection (for PROD)
+    environment: ${{ github.event.inputs.environment }}
 
-      - uses: hashicorp/setup-terraform@v3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
 
       - name: Install Terragrunt
         run: |
@@ -66,12 +79,34 @@ jobs:
           chmod +x terragrunt_linux_amd64
           sudo mv terragrunt_linux_amd64 /usr/local/bin/terragrunt
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ap-south-1
           role-to-assume: arn:aws:iam::273721849976:role/JenkinsRole
 
-      - name: Apply Selected Environment
+      - name: Run Terragrunt Action
         run: |
           cd live/${{ github.event.inputs.environment }}
-          terragrunt run-all apply -auto-approve --terragrunt-non-interactive
+
+          echo "Environment: ${{ github.event.inputs.environment }}"
+          echo "Action: ${{ github.event.inputs.action }}"
+
+          # Block PROD destroy (safety)
+          if [ "${{ github.event.inputs.environment }}" = "prod" ] && [ "${{ github.event.inputs.action }}" = "destroy" ]; then
+            echo " Destroy not allowed in PROD environment"
+            exit 1
+          fi
+
+          # Require confirmation for destroy
+          if [ "${{ github.event.inputs.action }}" = "destroy" ] && [ "${{ github.event.inputs.confirm }}" != "YES" ]; then
+            echo "Please type YES in confirm field to destroy"
+            exit 1
+          fi
+
+          # Apply or Destroy
+          if [ "${{ github.event.inputs.action }}" = "apply" ]; then
+            terragrunt run-all apply -auto-approve --terragrunt-non-interactive
+          else
+            terragrunt run-all destroy -auto-approve --terragrunt-non-interactive
+          fi
